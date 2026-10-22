@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="707" height="659" viewBox="0 0 707 659" role="img" aria-label="Terminal demo: messy events go in, clean records come out">
+<style>
+text{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:14px}
+@keyframes l0{0%,10.00%{opacity:0}10.80%,94%{opacity:1}100%{opacity:0}}.l0{opacity:0;animation:l0 16s linear infinite}
+@keyframes l1{0%,10.69%{opacity:0}11.49%,94%{opacity:1}100%{opacity:0}}.l1{opacity:0;animation:l1 16s linear infinite}
+@keyframes l2{0%,11.38%{opacity:0}12.18%,94%{opacity:1}100%{opacity:0}}.l2{opacity:0;animation:l2 16s linear infinite}
+@keyframes l3{0%,12.06%{opacity:0}12.86%,94%{opacity:1}100%{opacity:0}}.l3{opacity:0;animation:l3 16s linear infinite}
+@keyframes l4{0%,12.75%{opacity:0}13.55%,94%{opacity:1}100%{opacity:0}}.l4{opacity:0;animation:l4 16s linear infinite}
+@keyframes l5{0%,13.44%{opacity:0}14.24%,94%{opacity:1}100%{opacity:0}}.l5{opacity:0;animation:l5 16s linear infinite}
+@keyframes l6{0%,14.13%{opacity:0}14.93%,94%{opacity:1}100%{opacity:0}}.l6{opacity:0;animation:l6 16s linear infinite}
+@keyframes l7{0%,14.81%{opacity:0}15.61%,94%{opacity:1}100%{opacity:0}}.l7{opacity:0;animation:l7 16s linear infinite}
+@keyframes l8{0%,15.50%{opacity:0}16.30%,94%{opacity:1}100%{opacity:0}}.l8{opacity:0;animation:l8 16s linear infinite}
+@keyframes l9{0%,16.19%{opacity:0}16.99%,94%{opacity:1}100%{opacity:0}}.l9{opacity:0;animation:l9 16s linear infinite}
+@keyframes l10{0%,16.88%{opacity:0}17.68%,94%{opacity:1}100%{opacity:0}}.l10{opacity:0;animation:l10 16s linear infinite}
+@keyframes l11{0%,17.56%{opacity:0}18.36%,94%{opacity:1}100%{opacity:0}}.l11{opacity:0;animation:l11 16s linear infinite}
+@keyframes l12{0%,18.25%{opacity:0}19.05%,94%{opacity:1}100%{opacity:0}}.l12{opacity:0;animation:l12 16s linear infinite}
+@keyframes l13{0%,18.94%{opacity:0}19.74%,94%{opacity:1}100%{opacity:0}}.l13{opacity:0;animation:l13 16s linear infinite}
+@keyframes l14{0%,19.63%{opacity:0}20.43%,94%{opacity:1}100%{opacity:0}}.l14{opacity:0;animation:l14 16s linear infinite}
+@keyframes l15{0%,20.31%{opacity:0}21.11%,94%{opacity:1}100%{opacity:0}}.l15{opacity:0;animation:l15 16s linear infinite}
+@keyframes l16{0%,21.00%{opacity:0}21.80%,94%{opacity:1}100%{opacity:0}}.l16{opacity:0;animation:l16 16s linear infinite}
+@keyframes l17{0%,21.69%{opacity:0}22.49%,94%{opacity:1}100%{opacity:0}}.l17{opacity:0;animation:l17 16s linear infinite}
+@keyframes l18{0%,22.38%{opacity:0}23.18%,94%{opacity:1}100%{opacity:0}}.l18{opacity:0;animation:l18 16s linear infinite}
+@keyframes l19{0%,23.06%{opacity:0}23.86%,94%{opacity:1}100%{opacity:0}}.l19{opacity:0;animation:l19 16s linear infinite}
+@keyframes l20{0%,23.75%{opacity:0}24.55%,94%{opacity:1}100%{opacity:0}}.l20{opacity:0;animation:l20 16s linear infinite}
+@keyframes l21{0%,24.44%{opacity:0}25.24%,94%{opacity:1}100%{opacity:0}}.l21{opacity:0;animation:l21 16s linear infinite}
+@keyframes l22{0%,25.12%{opacity:0}25.92%,94%{opacity:1}100%{opacity:0}}.l22{opacity:0;animation:l22 16s linear infinite}
+@keyframes l23{0%,25.81%{opacity:0}26.61%,94%{opacity:1}100%{opacity:0}}.l23{opacity:0;animation:l23 16s linear infinite}
+@keyframes l24{0%,26.50%{opacity:0}27.30%,94%{opacity:1}100%{opacity:0}}.l24{opacity:0;animation:l24 16s linear infinite}
+@keyframes l25{0%,27.19%{opacity:0}27.99%,94%{opacity:1}100%{opacity:0}}.l25{opacity:0;animation:l25 16s linear infinite}
+@keyframes type{0%{width:0}2%{width:0}7.50%{width:118.02px}94%{width:118.02px}100%{width:0}}.type{animation:type 16s steps(14) infinite}
+</style>
+<rect width="707" height="659" rx="14" fill="#05050B"/>
+<rect x="0.5" y="0.5" width="706" height="658" rx="14" fill="none" stroke="#1E1B2E"/>
+<circle cx="24" cy="22" r="5.5" fill="#2A2638"/><circle cx="42" cy="22" r="5.5" fill="#2A2638"/><circle cx="60" cy="22" r="5.5" fill="#2A2638"/>
+<text x="353.5" y="26" text-anchor="middle" fill="#8B86A0" style="font-size:12px">genesys-conversation-stitcher</text>
+<line x1="0" y1="42" x2="707" y2="42" stroke="#1E1B2E"/>
+<clipPath id="typed"><rect class="type" x="44.86" y="47" height="21" width="0"/></clipPath>
+<text x="28" y="64" xml:space="preserve"><tspan fill="#6FF2C6">$</tspan></text>
+<text x="44.86" y="64" fill="#F4F2EC" clip-path="url(#typed)">npm run demo</text>
+<text class="l0" x="28" y="85" xml:space="preserve"><tspan fill="#F4F2EC" ></tspan></text>
+<text class="l1" x="28" y="106" xml:space="preserve"><tspan fill="#8B86A0" >  </tspan><tspan fill="#8B86A0" letter-spacing="2">WHAT ARRIVES</tspan></text>
+<text class="l2" x="28" y="127" xml:space="preserve"><tspan fill="#F4F2EC" ></tspan></text>
+<text class="l3" x="28" y="148" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:04</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-73d81d8b</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >flow.start</tspan><tspan fill="#F4F2EC" >      </tspan></text>
+<text class="l4" x="28" y="169" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:12</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-73d81d8b</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >customer.start</tspan><tspan fill="#F4F2EC" >  </tspan></text>
+<text class="l5" x="28" y="190" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:28</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-73d81d8b</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >acd.start</tspan><tspan fill="#F4F2EC" >       </tspan></text>
+<text class="l6" x="28" y="211" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:28</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-73d81d8b</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >flow.end</tspan><tspan fill="#F4F2EC" >        </tspan><tspan fill="#A98BFF" >out of order</tspan></text>
+<text class="l7" x="28" y="232" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:47</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-2780d7c4</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >flow.start</tspan><tspan fill="#F4F2EC" >      </tspan></text>
+<text class="l8" x="28" y="253" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:47</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-2780d7c4</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >customer.start</tspan><tspan fill="#F4F2EC" >  </tspan></text>
+<text class="l9" x="28" y="274" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:55</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-cf753894</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >customer.start</tspan><tspan fill="#F4F2EC" >  </tspan></text>
+<text class="l10" x="28" y="295" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:55</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-cf753894</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >flow.start</tspan><tspan fill="#F4F2EC" >      </tspan></text>
+<text class="l11" x="28" y="316" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#8B86A0" >09:00:56</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >conv-cf753894</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F4F2EC" >customer.start</tspan><tspan fill="#F4F2EC" >  </tspan><tspan fill="#F2C46D" >duplicate</tspan></text>
+<text class="l12" x="28" y="337" xml:space="preserve"><tspan fill="#8B86A0" >  … 323 more</tspan></text>
+<text class="l13" x="28" y="358" xml:space="preserve"><tspan fill="#F4F2EC" ></tspan></text>
+<text class="l14" x="28" y="379" xml:space="preserve"><tspan fill="#8B86A0" >  </tspan><tspan fill="#8B86A0" letter-spacing="2">WHAT COMES OUT</tspan></text>
+<text class="l15" x="28" y="400" xml:space="preserve"><tspan fill="#F4F2EC" ></tspan></text>
+<text class="l16" x="28" y="421" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#6FF2C6" >✓</tspan><tspan fill="#F4F2EC" > conv-c31782a3  voice    1m 11s  support                abandoned</tspan></text>
+<text class="l17" x="28" y="442" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#6FF2C6" >✓</tspan><tspan fill="#F4F2EC" > conv-a0d4f551  voice    2m 10s  billing                abandoned</tspan></text>
+<text class="l18" x="28" y="463" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#6FF2C6" >✓</tspan><tspan fill="#F4F2EC" > conv-73d81d8b  voice    3m 45s  retention → support    sale, follow-up</tspan></text>
+<text class="l19" x="28" y="484" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#6FF2C6" >✓</tspan><tspan fill="#F4F2EC" > conv-cf753894  voice    3m 59s  retention → sales      sale, info-only</tspan></text>
+<text class="l20" x="28" y="505" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#6FF2C6" >✓</tspan><tspan fill="#F4F2EC" > conv-55205b90  voice    3m 40s  retention              info-only</tspan></text>
+<text class="l21" x="28" y="526" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#6FF2C6" >✓</tspan><tspan fill="#F4F2EC" > conv-49c4d82a  voice    1m 58s  retention              abandoned</tspan></text>
+<text class="l22" x="28" y="547" xml:space="preserve"><tspan fill="#8B86A0" >  … 19 more</tspan></text>
+<text class="l23" x="28" y="568" xml:space="preserve"><tspan fill="#F4F2EC" ></tspan></text>
+<text class="l24" x="28" y="589" xml:space="preserve"><tspan fill="#F4F2EC" >  332 events in, 25 records out</tspan><tspan fill="#8B86A0" > (42 duplicates, 21 out of order, 1 revision)</tspan></text>
+<text class="l25" x="28" y="610" xml:space="preserve"><tspan fill="#F4F2EC" >  </tspan><tspan fill="#6FF2C6" >✓</tspan><tspan fill="#F4F2EC" > every record matches what actually happened</tspan></text>
+
+</svg>

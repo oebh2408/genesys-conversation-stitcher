@@ -2,19 +2,17 @@
 
 # genesys-conversation-stitcher
 
+[![ci](https://github.com/oebh2408/genesys-conversation-stitcher/actions/workflows/ci.yml/badge.svg)](https://github.com/oebh2408/genesys-conversation-stitcher/actions/workflows/ci.yml)
+![zero dependencies](https://img.shields.io/badge/runtime%20dependencies-0-6FF2C6)
+![license](https://img.shields.io/badge/license-MIT-A98BFF)
+
 Genesys Cloud tells you about a conversation one small event at a time: the customer connected, the call entered a queue, an agent answered, someone hung up, the agent picked a wrap-up code. Those events arrive **partial, duplicated, out of order and sometimes late**. Anything downstream (a CRM sync, a data warehouse, an analytics or AI pipeline) usually wants the opposite: **one complete, correct record per conversation, once it is over**.
 
 This library is the piece in between. It is small, has zero runtime dependencies, runs in a long-lived process or in **serverless functions**, and comes with a simulator so you can see it work without a Genesys account.
 
-```
-$ npx genesys-conversation-stitcher
+<img src="docs/demo.svg" alt="Terminal demo: 332 messy events go in, 25 clean records come out, every one matching what actually happened" width="100%">
 
-  in   288 events for 25 conversations
-       37 duplicates, 20 out of order, 2 after emission
-
-  out  25 clean records (2 revisions)
-       ✓ every record matches what actually happened
-```
+<sub>The demo above is real output from the built-in simulator. Run it yourself with `npm install && npm run demo`.</sub>
 
 ## Why this is harder than it looks
 
@@ -25,6 +23,8 @@ $ npx genesys-conversation-stitcher
 | Sends the customer hang-up before the agent's wrap-up | Record is written without the wrap-up code | Waits until every session has ended, then a quiet settle window |
 | Sends an event after the record was written | Silent data loss | Emits a new revision of the record (or drops it, your choice) |
 | Never sends the end at all | Conversation stays in memory forever | Idle timeout emits what is known, flagged as `timeout` |
+| Keeps a messaging conversation open for days | State grows with every event | Old events are compacted into a summary; state stays bounded |
+| Sends the whole conversation on every change (snapshot topics) | The same session counted ten times | Snapshots become events with stable fingerprints, so repeats collapse |
 
 ## Install
 
@@ -98,7 +98,9 @@ The stitcher never reads the clock on its own: `ingest(event, now)` and `tick(no
     "duplicatesDropped": 7,
     "outOfOrderEvents": 1,
     "lateEvents": 0,
-    "openSessions": 0
+    "openSessions": 0,
+    "compactedEvents": 0,
+    "timelineEntriesDropped": 0
   }
 }
 ```
@@ -155,16 +157,17 @@ const { deliveries, truth } = simulate({
   duplicateRate: 0.3,
   reorderRate: 0.3,
   straggleRate: 0.05,  // events that arrive after the record was emitted
+  format: "detail",    // or "snapshot": the whole conversation on every change
 });
 
 const records = replay(new ConversationStitcher(), deliveries);
 ```
 
-From the command line:
+From the command line, in a clone of this repository:
 
 ```bash
-npx genesys-conversation-stitcher --conversations 100 --seed 3 --straggle 0.05
-npx genesys-conversation-stitcher --json > records.json
+npm run demo -- --conversations 100 --seed 3 --straggle 0.05
+npm run demo -- --json > records.json
 ```
 
 ## Surviving restarts (in-memory flavour)
@@ -172,24 +175,36 @@ npx genesys-conversation-stitcher --json > records.json
 `ConversationStitcher` keeps state in memory. To survive a deploy or a crash, persist a snapshot and restore it on boot:
 
 ```ts
-await store.put("stitcher", JSON.stringify(stitcher.snapshot()));
+await kv.put("stitcher", JSON.stringify(stitcher.snapshot()));
 // later
-stitcher.restore(JSON.parse(await store.get("stitcher")));
+stitcher.restore(JSON.parse(await kv.get("stitcher")));
 ```
 
 Combined with re-delivery from your queue, duplicates are dropped by fingerprint, so replaying a few minutes of events is safe. See [ADR 0004](docs/adr/0004-in-memory-state-with-snapshots.md).
 
+## Long conversations
+
+A messaging conversation can stay open for days and collect thousands of events. Keeping all of them would make every conversation's state grow without limit, which hurts most in serverless mode, where the state is read and written on every batch.
+
+Once a conversation holds more than `compactAfterEvents` raw events (500 by default), the ones older than `compactLagMs` (15 min) behind the newest event are folded into a compact summary and dropped. Only their fingerprints are kept for a while, so late duplicates are still recognized. Recent events stay raw, so normal reordering is still handled exactly. The timeline keeps its first entry and the most recent ones (`maxTimelineEntries`, 1000).
+
+In numbers, from the test suite: a single conversation with 100,000 events is processed in about 1.3 s and its stored state stays around 300 KB from the first thousand events to the last. `delivery.compactedEvents` tells you when it kicked in. Trade-offs in [ADR 0006](docs/adr/0006-compacting-long-conversations.md).
+
 ## Input format
 
-The built-in adapter reads conversation detail event topics, `v2.detail.events.conversation.{id}.{kind}`, and these fields from `eventBody` when present: `eventTime` (epoch ms or ISO 8601), `conversationId`, `participantId`, `sessionId`, `participantPurpose`, `mediaType`, `direction`, `queueId`, `userId`, `ani`, `dnis`, `disconnectType`, `wrapupCode`, `wrapupNotes`, `attributes`.
+The default adapter understands two families of Genesys Cloud topics. Use whichever your integration already subscribes to; mixing both for the same conversation is not recommended, because their timestamps can differ by a few milliseconds.
 
-Event payloads differ between organizations and topic versions, so treat the adapter as a starting point. Pass your own with the `normalize` option to map any other shape:
+**Detail events**, `v2.detail.events.conversation.{id}.{kind}`: one small event per change. Fields read from `eventBody` when present: `eventTime` (epoch ms or ISO 8601), `conversationId`, `participantId`, `sessionId`, `participantPurpose`, `mediaType`, `direction`, `queueId`, `userId`, `ani`, `dnis`, `disconnectType`, `wrapupCode`, `wrapupNotes`, `attributes`.
+
+**Conversation snapshots**, `v2.conversations.{id}`, `v2.users.{id}.conversations`, `v2.routing.queues.{id}.conversations`: the whole conversation on every change. Each snapshot is turned into the equivalent start, end, wrap-up and attribute events. Their fingerprints depend only on what they describe, so the same session seen in ten snapshots is applied once. Fields read per participant: `id`, `purpose`, `userId`, `queueId`, `ani`, `dnis`, `attributes`, `wrapup` (`code`, `notes`, `endTimestamp`), and per media session in `calls`, `callbacks`, `chats`, `emails` and `messages`: `id`, `direction`, `connectedTime`, `disconnectedTime`, `disconnectType`. Details in [ADR 0007](docs/adr/0007-snapshot-topics-as-events.md).
+
+Payloads differ between organizations and topic versions, so treat the adapters as a starting point. Pass your own with the `normalize` option to map any other shape; it may return one event, several, or `null`:
 
 ```ts
-import { ConversationStitcher, normalizeDetailEvent } from "genesys-conversation-stitcher";
+import { ConversationStitcher, normalizeNotification } from "genesys-conversation-stitcher";
 
 new ConversationStitcher({
-  normalize: (n) => ({ ...normalizeDetailEvent(n)!, queueId: n.eventBody.routingQueueId as string }),
+  normalize: (n) => n.topicName.startsWith("my.custom.") ? myAdapter(n) : normalizeNotification(n),
 });
 ```
 
@@ -197,7 +212,7 @@ new ConversationStitcher({
 
 | Member | Description |
 | --- | --- |
-| `new ConversationStitcher(options?)` | `settleMs`, `idleTimeoutMs`, `lateEvents`, `retainEmittedMs`, `normalize` |
+| `new ConversationStitcher(options?)` | `settleMs`, `idleTimeoutMs`, `lateEvents`, `retainEmittedMs`, `compactAfterEvents`, `compactLagMs`, `maxTimelineEntries`, `normalize` |
 | `ingest(notification, now?)` | Returns `{ status }`: `applied`, `duplicate`, `late`, `late-dropped` or `ignored` |
 | `ingestAll(notifications, now?)` | Same, for a batch |
 | `tick(now?)` | Emits ready conversations and returns them; forgets expired ones |
@@ -209,6 +224,7 @@ new ConversationStitcher({
 | `new StoredConversationStitcher(store, options?)` | Same options plus `ackTimeoutMs` and `maxAttempts`; `ingest`, `ingestAll` and `tick` return promises |
 | `MemoryConversationStore` | Reference `ConversationStore`, kept in memory |
 | `consolidate(events)` | The pure folding function, if you want to bring your own buffering |
+| `normalizeNotification` / `normalizeDetailEvent` / `normalizeConversationSnapshot` | The built-in adapters |
 | `simulate(options?)` / `replay(...)` / `replayStored(...)` | Simulator and simulated-clock runners |
 
 ## Design decisions
@@ -218,6 +234,8 @@ new ConversationStitcher({
 - [0003 · Idempotency by content fingerprint, late events as revisions](docs/adr/0003-idempotency-and-revisions.md)
 - [0004 · In-memory state with snapshots, no built-in storage](docs/adr/0004-in-memory-state-with-snapshots.md)
 - [0005 · Serverless: per-conversation store and optimistic concurrency](docs/adr/0005-serverless-store-and-optimistic-concurrency.md)
+- [0006 · Compacting long conversations](docs/adr/0006-compacting-long-conversations.md)
+- [0007 · Snapshot topics as events](docs/adr/0007-snapshot-topics-as-events.md)
 
 ## Development
 
@@ -225,6 +243,7 @@ new ConversationStitcher({
 npm install
 npm test        # unit, concurrency and property tests against the simulator's ground truth
 npm run demo
+npm run demo:svg   # re-renders docs/demo.svg from the real demo output
 ```
 
 ## License
