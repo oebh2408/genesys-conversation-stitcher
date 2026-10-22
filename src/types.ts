@@ -102,6 +102,10 @@ export interface DeliveryReport {
   lateEvents: number;
   /** Sessions that started but never reported an end. */
   openSessions: number;
+  /** Events folded into the checkpoint of a long conversation. */
+  compactedEvents: number;
+  /** Timeline entries dropped to keep a long conversation's timeline bounded. */
+  timelineEntriesDropped: number;
 }
 
 /** The single, clean record emitted per conversation. */
@@ -151,8 +155,20 @@ export interface StitcherOptions {
    * again. Default: 60 s.
    */
   ackTimeoutMs?: number;
+  /**
+   * Long conversations: once more than this many raw events are held, older
+   * ones are folded into a compact summary. Default: 500.
+   */
+  compactAfterEvents?: number;
+  /**
+   * Events newer than this, relative to the newest event, are never compacted,
+   * so they can still be reordered exactly. Default: 15 min.
+   */
+  compactLagMs?: number;
+  /** Long conversations: the timeline keeps its first entry and the most recent ones, up to this many. Default: 1000. */
+  maxTimelineEntries?: number;
   /** Replace the built-in topic adapter. Return `null` to ignore a notification. */
-  normalize?: (n: RawNotification) => ConversationEvent | null;
+  normalize?: (n: RawNotification) => ConversationEvent | ConversationEvent[] | null;
 }
 
 export type RecordListener = (record: ConsolidatedConversation) => void;

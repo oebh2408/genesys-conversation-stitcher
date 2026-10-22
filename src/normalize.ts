@@ -66,7 +66,7 @@ function stringMap(v: unknown): Record<string, string> | undefined {
 }
 
 /**
- * Default adapter for `v2.detail.events.conversation.{id}.{kind}` topics.
+ * Adapter for `v2.detail.events.conversation.{id}.{kind}` topics.
  * Returns `null` for anything it cannot place in a conversation.
  */
 export function normalizeDetailEvent(n: RawNotification): ConversationEvent | null {
@@ -96,4 +96,113 @@ export function normalizeDetailEvent(n: RawNotification): ConversationEvent | nu
     attributes: stringMap(body.attributes),
     topic: n.topicName,
   };
+}
+
+const SNAPSHOT_TOPIC = /^v2\.(?:conversations|users\.[^.]+\.conversations|routing\.queues\.[^.]+\.conversations)(?:\.[^.]+)?$/;
+
+const MEDIA: Array<[field: string, mediaType: string]> = [
+  ["calls", "voice"],
+  ["callbacks", "callback"],
+  ["chats", "chat"],
+  ["emails", "email"],
+  ["messages", "message"],
+];
+
+const KIND_PREFIX: Record<string, "customer" | "user" | "acd" | "flow"> = {
+  customer: "customer",
+  external: "customer",
+  agent: "user",
+  user: "user",
+  acd: "acd",
+  ivr: "flow",
+  workflow: "flow",
+};
+
+function obj(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+function list(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v) ? v.map(obj).filter((x): x is Record<string, unknown> => !!x) : [];
+}
+
+/**
+ * Adapter for conversation snapshot topics (`v2.conversations.{id}`,
+ * `v2.users.{id}.conversations`, `v2.routing.queues.{id}.conversations`),
+ * which carry the whole conversation on every change.
+ *
+ * Each snapshot is turned into the equivalent start, end, wrap-up and
+ * attribute events. Their fingerprints depend only on what they describe, so
+ * the same session seen in ten snapshots is applied once and the other nine
+ * are dropped as duplicates.
+ */
+export function normalizeConversationSnapshot(n: RawNotification): ConversationEvent[] | null {
+  const body = n.eventBody ?? {};
+  const conversationId = str(body.id) ?? str(body.conversationId);
+  if (!conversationId || !Array.isArray(body.participants)) return null;
+
+  const out: ConversationEvent[] = [];
+  const push = (e: Omit<ConversationEvent, "key" | "topic" | "conversationId">) => {
+    const event = { ...e, conversationId } as ConversationEvent;
+    // The topic is left out of the fingerprint: the same session seen through a
+    // user topic and a queue topic is one event.
+    out.push({ ...event, topic: n.topicName, key: hash(`snapshot|${stableStringify(event)}`) });
+  };
+
+  for (const p of list(body.participants)) {
+    const purpose = str(p.purpose);
+    const prefix = purpose && KIND_PREFIX[purpose];
+    const participantId = str(p.id);
+    if (!prefix || !participantId) continue;
+    const who = {
+      participantId,
+      purpose: prefix === "user" ? "agent" : purpose,
+      userId: str(p.userId) ?? str(obj(p.user)?.id),
+      queueId: str(p.queueId) ?? str(obj(p.queue)?.id),
+    };
+    let first: number | undefined;
+    let last: number | undefined;
+
+    for (const [field, mediaType] of MEDIA) {
+      for (const m of list(p[field])) {
+        const session = {
+          ...who,
+          sessionId: str(m.id) ?? `${participantId}:${field}`,
+          mediaType,
+          direction: str(m.direction),
+        };
+        const start = time(m.connectedTime) ?? time(m.startAlertingTime) ?? time(p.startTime);
+        const end = time(m.disconnectedTime);
+        if (start !== undefined) {
+          push({ ...session, kind: `${prefix}.start` as EventKind, eventTime: start, ani: str(p.ani), dnis: str(p.dnis) });
+          first = Math.min(first ?? start, start);
+        }
+        if (end !== undefined) {
+          push({ ...session, kind: `${prefix}.end` as EventKind, eventTime: end, disconnectType: str(m.disconnectType) });
+          last = Math.max(last ?? end, end);
+        }
+      }
+    }
+
+    const wrapup = obj(p.wrapup);
+    const code = str(wrapup?.code) ?? str(wrapup?.name);
+    const wrapupTime = time(wrapup?.endTimestamp) ?? time(p.endTime) ?? last;
+    if (code && wrapupTime !== undefined) {
+      push({ ...who, kind: "wrapup", eventTime: wrapupTime, wrapupCode: code, wrapupNotes: str(wrapup?.notes) });
+    }
+
+    const attributes = stringMap(p.attributes);
+    const attributesTime = time(p.startTime) ?? first;
+    if (attributes && Object.keys(attributes).length && attributesTime !== undefined) {
+      push({ ...who, kind: "attributes", eventTime: attributesTime, attributes });
+    }
+  }
+  return out;
+}
+
+/** Default adapter: detail event topics and conversation snapshot topics. */
+export function normalizeNotification(n: RawNotification): ConversationEvent | ConversationEvent[] | null {
+  if (TOPIC.test(n.topicName)) return normalizeDetailEvent(n);
+  if (SNAPSHOT_TOPIC.test(n.topicName)) return normalizeConversationSnapshot(n);
+  return null;
 }

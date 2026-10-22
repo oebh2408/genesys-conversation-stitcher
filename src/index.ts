@@ -5,8 +5,15 @@ export type { AsyncRecordListener, StoredStitcherOptions } from "./stored-stitch
 export { MemoryConversationStore } from "./store.js";
 export type { ConversationStore, StoredConversation } from "./store.js";
 export type { ConversationState, IngestStatus } from "./state.js";
-export { consolidate, allSessionsEnded } from "./consolidate.js";
-export { normalizeDetailEvent, fingerprint, stableStringify } from "./normalize.js";
+export { consolidate, allSessionsEnded, createAccumulator, accumulate, fold, finish } from "./consolidate.js";
+export type { Accumulator, Consolidated } from "./consolidate.js";
+export {
+  normalizeNotification,
+  normalizeDetailEvent,
+  normalizeConversationSnapshot,
+  fingerprint,
+  stableStringify,
+} from "./normalize.js";
 export { simulate, replay, replayStored } from "./simulator.js";
 export type {
   Delivery,

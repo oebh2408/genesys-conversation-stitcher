@@ -1,13 +1,16 @@
-import { normalizeDetailEvent } from "./normalize.js";
+import { normalizeNotification } from "./normalize.js";
 import {
   applyEvent,
   buildRecord,
+  combineStatus,
   decide,
   emitRecord,
   newState,
   nextDueAt,
   resolvePolicy,
+  toEvents,
   type ConversationState,
+  type IngestStatus,
   type Policy,
 } from "./state.js";
 import type { IngestResult } from "./stitcher.js";
@@ -46,7 +49,7 @@ export class ConcurrencyError extends Error {
  */
 export class StoredConversationStitcher {
   private readonly policy: Policy;
-  private readonly normalize: (n: RawNotification) => ConversationEvent | null;
+  private readonly normalize: (n: RawNotification) => ConversationEvent | ConversationEvent[] | null;
   private readonly maxAttempts: number;
   private readonly listeners = new Set<AsyncRecordListener>();
 
@@ -55,7 +58,7 @@ export class StoredConversationStitcher {
     options: StoredStitcherOptions = {},
   ) {
     this.policy = resolvePolicy(options);
-    this.normalize = options.normalize ?? normalizeDetailEvent;
+    this.normalize = options.normalize ?? normalizeNotification;
     this.maxAttempts = options.maxAttempts ?? 20;
   }
 
@@ -75,26 +78,32 @@ export class StoredConversationStitcher {
    * is loaded and saved once; different conversations are written in parallel.
    */
   async ingestAll(notifications: Iterable<RawNotification>, now: number = Date.now()): Promise<IngestResult[]> {
-    const results: IngestResult[] = [];
+    const statuses: IngestStatus[][] = [];
+    const conversationOf: Array<string | undefined> = [];
     const groups = new Map<string, Array<{ index: number; event: ConversationEvent }>>();
     for (const n of notifications) {
-      const index = results.length;
-      const event = this.normalize(n);
-      results.push({ status: "ignored" });
-      if (!event) continue;
-      const group = groups.get(event.conversationId) ?? [];
-      group.push({ index, event });
-      groups.set(event.conversationId, group);
+      const index = statuses.length;
+      const events = toEvents(this.normalize(n));
+      statuses.push([]);
+      conversationOf.push(events[0]?.conversationId);
+      for (const event of events) {
+        const group = groups.get(event.conversationId) ?? [];
+        group.push({ index, event });
+        groups.set(event.conversationId, group);
+      }
     }
 
     await Promise.all(
       [...groups].map(([conversationId, group]) =>
         this.update(conversationId, now, (state) => {
-          for (const { index, event } of group) {
-            results[index] = { status: applyEvent(state, event, now, this.policy), conversationId };
-          }
+          // Reset on every attempt: a conflict reloads the state and reapplies.
+          for (const { index } of group) statuses[index] = [];
+          for (const { index, event } of group) statuses[index].push(applyEvent(state, event, now, this.policy));
         }),
       ),
+    );
+    const results: IngestResult[] = statuses.map((s, i) =>
+      s.length ? { status: combineStatus(s), conversationId: conversationOf[i] } : { status: "ignored" },
     );
     return results;
   }

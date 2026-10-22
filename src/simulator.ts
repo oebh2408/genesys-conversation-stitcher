@@ -29,6 +29,11 @@ export interface SimulationOptions {
   straggleRate?: number;
   /** Delay for straggling events. Default 2 min. */
   straggleMs?: number;
+  /**
+   * "detail": one small event per change (default).
+   * "snapshot": the whole conversation on every change, as conversation topics deliver it.
+   */
+  format?: "detail" | "snapshot";
 }
 
 export interface Delivery {
@@ -187,8 +192,10 @@ export function simulate(options: SimulationOptions = {}): Simulation {
       eventCount: events.length,
     });
 
-    for (const notification of events) {
-      const happened = notification.eventBody.eventTime as number;
+    const stream = options.format === "snapshot" ? toSnapshots(conversationId, events) : events;
+    for (const [i, notification] of stream.entries()) {
+      // Snapshots are built one per detail event, so the times line up.
+      const happened = events[i].eventBody.eventTime as number;
       const jitter = (min: number, max: number) => Math.floor(min + noise() * (max - min + 1));
       let at = happened + jitter(40, 600);
       if (noise() < reorderRate) at += jitter(500, reorderWindowMs);
@@ -265,6 +272,47 @@ export async function replayStored(
     await Promise.all(batch.map((d) => stitcher.ingest(d.notification, d.at)));
     out.push(...(await stitcher.tick(now, Infinity)));
     now += step;
+  }
+  return out;
+}
+
+const MEDIA_FIELD: Record<string, string> = { voice: "calls", message: "messages" };
+
+/** Replays detail events into the sequence of full snapshots a conversation topic would send. */
+function toSnapshots(conversationId: string, events: RawNotification[]): RawNotification[] {
+  const iso = (t: number) => new Date(t).toISOString();
+  const participants = new Map<string, Record<string, any>>();
+  const out: RawNotification[] = [];
+
+  for (const { topicName, eventBody: b } of events) {
+    const kind = topicName.slice(topicName.indexOf(conversationId) + conversationId.length + 1);
+    const t = b.eventTime as number;
+    if (kind === "attributes") {
+      const customer = [...participants.values()].find((p) => p.purpose === "customer");
+      if (customer) customer.attributes = { ...customer.attributes, ...(b.attributes as object) };
+    } else if (b.participantId) {
+      const id = b.participantId as string;
+      const p = participants.get(id) ?? { id, purpose: b.participantPurpose, userId: b.userId, queueId: b.queueId };
+      participants.set(id, p);
+      if (b.ani) p.ani = b.ani;
+      if (b.dnis) p.dnis = b.dnis;
+      const field = MEDIA_FIELD[b.mediaType as string];
+      p[field] ??= [];
+      let media = p[field].find((m: any) => m.id === b.sessionId);
+      if (!media && kind.endsWith(".start")) {
+        media = { id: b.sessionId, direction: b.direction, state: "connected", connectedTime: iso(t) };
+        p[field].push(media);
+      }
+      if (media && kind.endsWith(".end")) {
+        Object.assign(media, { state: "disconnected", disconnectedTime: iso(t), disconnectType: b.disconnectType });
+      }
+      if (kind === "wrapup") p.wrapup = { code: b.wrapupCode, notes: b.wrapupNotes, endTimestamp: iso(t) };
+    }
+    out.push({
+      topicName: `v2.conversations.${conversationId}`,
+      version: "2",
+      eventBody: { id: conversationId, participants: structuredClone([...participants.values()]) },
+    });
   }
   return out;
 }

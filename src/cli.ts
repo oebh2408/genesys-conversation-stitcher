@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { ConversationStitcher } from "./stitcher.js";
+import { normalizeDetailEvent } from "./normalize.js";
 import { replay, simulate } from "./simulator.js";
 
 function arg(name: string, fallback: number): number {
@@ -8,7 +9,7 @@ function arg(name: string, fallback: number): number {
 }
 
 const conversations = arg("conversations", 25);
-const seed = arg("seed", 7);
+const seed = arg("seed", 19);
 const straggleRate = arg("straggle", 0.02);
 const json = process.argv.includes("--json");
 
@@ -39,24 +40,40 @@ if (json) {
   process.exit(mismatches ? 1 : 0);
 }
 
-const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
-const ok = (s: string) => `\x1b[38;2;111;242;198m${s}\x1b[0m`;
-const warn = (s: string) => `\x1b[38;2;242;196;109m${s}\x1b[0m`;
+const color = process.stdout.isTTY || process.env.FORCE_COLOR ? true : false;
+const paint = (code: string) => (s: string) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
+const dim = paint("2");
+const ok = paint("38;2;111;242;198");
+const warn = paint("38;2;242;196;109");
+const violet = paint("38;2;169;139;255");
+const clock = (t: number) => new Date(t).toISOString().slice(11, 19);
+
+// A taste of what arrives: the first deliveries, tagged with what is wrong with them.
+const seen = new Set<string>();
+const newest = new Map<string, number>();
+console.log(`\n  ${dim("WHAT ARRIVES")}\n`);
+for (const { at, notification } of deliveries.slice(0, 9)) {
+  const e = normalizeDetailEvent(notification)!;
+  let tag = "";
+  if (seen.has(e.key)) tag = warn("duplicate");
+  else if (e.eventTime < (newest.get(e.conversationId) ?? -Infinity)) tag = violet("out of order");
+  seen.add(e.key);
+  newest.set(e.conversationId, Math.max(newest.get(e.conversationId) ?? 0, e.eventTime));
+  console.log(`  ${dim(clock(at))}  ${e.conversationId}  ${e.kind.padEnd(15)} ${tag}`);
+}
+console.log(dim(`  … ${deliveries.length - 9} more`));
+
+console.log(`\n  ${dim("WHAT COMES OUT")}\n`);
+const minutes = (ms: number) => `${Math.floor(ms / 60_000)}m ${String(Math.round((ms % 60_000) / 1000)).padStart(2, "0")}s`;
+for (const r of [...latest.values()].slice(0, 6)) {
+  const path = r.queues.length ? r.queues.map((q) => q.queueId).join(" → ") : "—";
+  const wraps = r.wrapUps.map((w) => w.code).join(", ") || "abandoned";
+  console.log(`  ${ok("✓")} ${r.conversationId}  ${r.mediaTypes.join("").padEnd(7)} ${minutes(r.durationMs).padStart(7)}  ${path.padEnd(22)} ${wraps}`);
+}
+console.log(dim(`  … ${latest.size - 6} more`));
 
 console.log(`
-  ${dim("in")}   ${deliveries.length} events for ${truth.length} conversations
-       ${warn(String(dupes))} duplicates, ${warn(String(sum((r) => r.delivery.outOfOrderEvents)))} out of order, ${warn(String(sum((r) => r.delivery.lateEvents)))} after emission
-
-  ${dim("out")}  ${latest.size} clean records ${dim(`(${records.length - latest.size} revisions)`)}
-       ${mismatches === 0 ? ok("✓ every record matches what actually happened") : warn(`✗ ${mismatches} records differ from ground truth`)}
+  ${deliveries.length} events in, ${latest.size} records out ${dim(`(${dupes} duplicates, ${sum((r) => r.delivery.outOfOrderEvents)} out of order, ${records.length - latest.size} ${records.length - latest.size === 1 ? "revision" : "revisions"})`)}
+  ${mismatches === 0 ? ok("✓ every record matches what actually happened") : warn(`✗ ${mismatches} records differ from what happened`)}
 `);
-
-const sample = [...latest.values()].find((r) => r.queues.length > 1) ?? records[0];
-console.log(dim("  sample record:\n"));
-console.log(
-  JSON.stringify({ ...sample, timeline: `[${sample.timeline.length} entries]`, participants: `[${sample.participants.length} participants]` }, null, 2)
-    .split("\n")
-    .map((l) => `  ${l}`)
-    .join("\n"),
-);
 process.exit(mismatches ? 1 : 0);

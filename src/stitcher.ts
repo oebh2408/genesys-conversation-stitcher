@@ -1,10 +1,12 @@
-import { normalizeDetailEvent } from "./normalize.js";
+import { normalizeNotification } from "./normalize.js";
 import {
   applyEvent,
+  combineStatus,
   decide,
   emitRecord,
   newState,
   resolvePolicy,
+  toEvents,
   type ConversationState,
   type IngestStatus,
   type Policy,
@@ -42,13 +44,13 @@ export interface IngestResult {
  */
 export class ConversationStitcher {
   private readonly policy: Policy;
-  private readonly normalize: (n: RawNotification) => ConversationEvent | null;
+  private readonly normalize: (n: RawNotification) => ConversationEvent | ConversationEvent[] | null;
   private readonly listeners = new Set<RecordListener>();
   private readonly conversations = new Map<string, ConversationState>();
 
   constructor(options: StitcherOptions = {}) {
     this.policy = resolvePolicy(options);
-    this.normalize = options.normalize ?? normalizeDetailEvent;
+    this.normalize = options.normalize ?? normalizeNotification;
   }
 
   /** Subscribes to emitted records. Returns an unsubscribe function. */
@@ -70,15 +72,18 @@ export class ConversationStitcher {
   }
 
   ingest(notification: RawNotification, now: number = Date.now()): IngestResult {
-    const event = this.normalize(notification);
-    if (!event) return { status: "ignored" };
+    const events = toEvents(this.normalize(notification));
+    if (events.length === 0) return { status: "ignored" };
 
-    let state = this.conversations.get(event.conversationId);
-    if (!state) {
-      state = newState(event.conversationId, now);
-      this.conversations.set(state.conversationId, state);
-    }
-    return { status: applyEvent(state, event, now, this.policy), conversationId: state.conversationId };
+    const statuses = events.map((event) => {
+      let state = this.conversations.get(event.conversationId);
+      if (!state) {
+        state = newState(event.conversationId, now);
+        this.conversations.set(state.conversationId, state);
+      }
+      return applyEvent(state, event, now, this.policy);
+    });
+    return { status: combineStatus(statuses), conversationId: events[0].conversationId };
   }
 
   /** Convenience for feeding a batch, e.g. one message from a queue. */

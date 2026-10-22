@@ -3,7 +3,6 @@ import type {
   EventKind,
   Participant,
   QueueVisit,
-  Session,
   TimelineEntry,
   WrapUp,
 } from "./types.js";
@@ -50,105 +49,168 @@ export interface Consolidated {
   wrapUps: WrapUp[];
   attributes: Record<string, string>;
   timeline: TimelineEntry[];
+  timelineDropped: number;
   openSessions: number;
+}
+
+/**
+ * The running result of folding events, as plain JSON. It can be stored as a
+ * checkpoint and folded further later, which is how long conversations are
+ * compacted.
+ */
+export interface Accumulator {
+  startTime?: number;
+  lastEventTime?: number;
+  lastEnd?: number;
+  direction?: string;
+  mediaTypes: Record<string, true>;
+  agents: Record<string, true>;
+  attributes: Record<string, string>;
+  participants: Record<string, Participant>;
+  /** sessionId -> participantId */
+  sessionOwners: Record<string, string>;
+  queues: Record<string, QueueVisit>;
+  wrapUps: Record<string, WrapUp>;
+  timeline: TimelineEntry[];
+  /** Timeline entries dropped by compaction to keep it bounded. */
+  timelineDropped?: number;
+}
+
+export function createAccumulator(): Accumulator {
+  return {
+    mediaTypes: {},
+    agents: {},
+    attributes: {},
+    participants: {},
+    sessionOwners: {},
+    queues: {},
+    wrapUps: {},
+    timeline: [],
+  };
+}
+
+/** Folds one event into the accumulator, in place. */
+export function accumulate(acc: Accumulator, e: ConversationEvent): void {
+  acc.startTime = Math.min(acc.startTime ?? e.eventTime, e.eventTime);
+  acc.lastEventTime = Math.max(acc.lastEventTime ?? e.eventTime, e.eventTime);
+  acc.timeline.push({ time: e.eventTime, kind: e.kind, participantId: e.participantId });
+  if (e.mediaType) acc.mediaTypes[e.mediaType] = true;
+  acc.direction ??= e.direction;
+  if (e.attributes) Object.assign(acc.attributes, e.attributes);
+  if (e.userId && (e.kind.startsWith("user.") || e.kind === "acw" || e.kind === "wrapup")) acc.agents[e.userId] = true;
+
+  if (e.participantId) {
+    let p = acc.participants[e.participantId];
+    if (!p) {
+      p = {
+        participantId: e.participantId,
+        purpose: e.purpose ?? PURPOSE_BY_PREFIX[e.kind.split(".")[0]] ?? "unknown",
+        sessions: [],
+      };
+      acc.participants[e.participantId] = p;
+    }
+    p.userId ??= e.userId;
+    p.ani ??= e.ani;
+    p.dnis ??= e.dnis;
+
+    if (isStart(e.kind) || isEnd(e.kind)) {
+      const sid = e.sessionId ?? e.participantId;
+      const owner = acc.participants[acc.sessionOwners[sid] ?? e.participantId];
+      let s = owner.sessions.find((x) => x.sessionId === sid);
+      if (!s) {
+        s = { sessionId: sid };
+        p.sessions.push(s);
+        acc.sessionOwners[sid] = p.participantId;
+      }
+      s.mediaType ??= e.mediaType;
+      s.direction ??= e.direction;
+      s.queueId ??= e.queueId;
+      if (isStart(e.kind)) s.startTime = Math.min(s.startTime ?? e.eventTime, e.eventTime);
+      if (isEnd(e.kind)) {
+        s.endTime = Math.max(s.endTime ?? e.eventTime, e.eventTime);
+        s.disconnectType ??= e.disconnectType;
+        acc.lastEnd = Math.max(acc.lastEnd ?? e.eventTime, e.eventTime);
+      }
+    }
+  }
+
+  if ((e.kind === "acd.start" || e.kind === "acd.end") && e.queueId) {
+    const id = `${e.sessionId ?? e.participantId ?? ""}|${e.queueId}`;
+    const q = acc.queues[id] ?? { queueId: e.queueId };
+    if (e.kind === "acd.start") q.enteredAt = e.eventTime;
+    else q.leftAt = e.eventTime;
+    if (q.enteredAt !== undefined && q.leftAt !== undefined) q.waitMs = q.leftAt - q.enteredAt;
+    acc.queues[id] = q;
+  }
+
+  if ((e.kind === "wrapup" || e.kind === "acw") && e.wrapupCode) {
+    const id = `${e.participantId ?? e.userId ?? ""}|${e.wrapupCode}`;
+    const prev = acc.wrapUps[id];
+    acc.wrapUps[id] = {
+      userId: e.userId ?? prev?.userId,
+      participantId: e.participantId ?? prev?.participantId,
+      code: e.wrapupCode,
+      notes: e.wrapupNotes ?? prev?.notes,
+      time: prev?.time ?? e.eventTime,
+    };
+  }
+}
+
+/** Folds events in event-time order on top of an optional checkpoint. */
+export function fold(events: Iterable<ConversationEvent>, base?: Accumulator): Accumulator {
+  const acc = base ? structuredClone(base) : createAccumulator();
+  for (const e of [...events].sort(compareEvents)) accumulate(acc, e);
+  return acc;
+}
+
+export function finish(acc: Accumulator): Consolidated {
+  let openSessions = 0;
+  for (const p of Object.values(acc.participants)) {
+    for (const s of p.sessions) if (s.endTime === undefined) openSessions++;
+  }
+  return {
+    startTime: acc.startTime ?? 0,
+    endTime: acc.lastEnd ?? acc.lastEventTime ?? 0,
+    mediaTypes: Object.keys(acc.mediaTypes).sort(),
+    direction: acc.direction,
+    participants: Object.values(acc.participants),
+    agents: Object.keys(acc.agents).sort(),
+    queues: Object.values(acc.queues).sort((a, b) => (a.enteredAt ?? 0) - (b.enteredAt ?? 0)),
+    wrapUps: Object.values(acc.wrapUps).sort((a, b) => a.time - b.time),
+    attributes: acc.attributes,
+    // Stable sort: same-time entries keep fold order.
+    timeline: [...acc.timeline].sort((a, b) => a.time - b.time),
+    timelineDropped: acc.timelineDropped ?? 0,
+    openSessions,
+  };
 }
 
 /**
  * Folds a set of events into one conversation. Pure and order-independent:
  * the events are sorted first, so any arrival order yields the same result.
  */
-export function consolidate(input: Iterable<ConversationEvent>): Consolidated {
-  const events = [...input].sort(compareEvents);
-  const participants = new Map<string, Participant>();
-  const sessions = new Map<string, Session>();
-  const queues = new Map<string, QueueVisit>();
-  const wrapUps = new Map<string, WrapUp>();
-  const mediaTypes = new Set<string>();
-  const agents = new Set<string>();
-  const attributes: Record<string, string> = {};
-  let direction: string | undefined;
-  let lastEnd: number | undefined;
+export function consolidate(input: Iterable<ConversationEvent>, base?: Accumulator): Consolidated {
+  return finish(fold(input, base));
+}
 
-  for (const e of events) {
-    if (e.mediaType) mediaTypes.add(e.mediaType);
-    if (!direction && e.direction) direction = e.direction;
-    if (e.attributes) Object.assign(attributes, e.attributes);
-    if (e.userId && (e.kind.startsWith("user.") || e.kind === "acw" || e.kind === "wrapup")) agents.add(e.userId);
-
-    if (e.participantId) {
-      let p = participants.get(e.participantId);
-      if (!p) {
-        p = {
-          participantId: e.participantId,
-          purpose: e.purpose ?? PURPOSE_BY_PREFIX[e.kind.split(".")[0]] ?? "unknown",
-          sessions: [],
-        };
-        participants.set(e.participantId, p);
-      }
-      p.userId ??= e.userId;
-      p.ani ??= e.ani;
-      p.dnis ??= e.dnis;
-
-      if (isStart(e.kind) || isEnd(e.kind)) {
-        const sid = e.sessionId ?? e.participantId;
-        let s = sessions.get(sid);
-        if (!s) {
-          s = { sessionId: sid };
-          sessions.set(sid, s);
-          p.sessions.push(s);
-        }
-        s.mediaType ??= e.mediaType;
-        s.direction ??= e.direction;
-        s.queueId ??= e.queueId;
-        if (isStart(e.kind)) s.startTime = Math.min(s.startTime ?? e.eventTime, e.eventTime);
-        if (isEnd(e.kind)) {
-          s.endTime = Math.max(s.endTime ?? e.eventTime, e.eventTime);
-          s.disconnectType ??= e.disconnectType;
-          lastEnd = Math.max(lastEnd ?? e.eventTime, e.eventTime);
-        }
-      }
-    }
-
-    if ((e.kind === "acd.start" || e.kind === "acd.end") && e.queueId) {
-      const id = `${e.sessionId ?? e.participantId ?? ""}|${e.queueId}`;
-      const q = queues.get(id) ?? { queueId: e.queueId };
-      if (e.kind === "acd.start") q.enteredAt = e.eventTime;
-      else q.leftAt = e.eventTime;
-      if (q.enteredAt !== undefined && q.leftAt !== undefined) q.waitMs = q.leftAt - q.enteredAt;
-      queues.set(id, q);
-    }
-
-    if ((e.kind === "wrapup" || e.kind === "acw") && e.wrapupCode) {
-      const id = `${e.participantId ?? e.userId ?? ""}|${e.wrapupCode}`;
-      const prev = wrapUps.get(id);
-      wrapUps.set(id, {
-        userId: e.userId ?? prev?.userId,
-        participantId: e.participantId ?? prev?.participantId,
-        code: e.wrapupCode,
-        notes: e.wrapupNotes ?? prev?.notes,
-        time: prev?.time ?? e.eventTime,
-      });
-    }
+/**
+ * True when there is at least one session and every one has ended, looking at
+ * a checkpoint plus raw events. Same answer as folding them, without the copy.
+ */
+export function sessionsEnded(base: Accumulator | undefined, events: Iterable<ConversationEvent> = []): boolean {
+  const ended = new Map<string, boolean>();
+  for (const p of Object.values(base?.participants ?? {})) {
+    for (const s of p.sessions) ended.set(s.sessionId, s.endTime !== undefined);
   }
-
-  const startTime = events.length ? events[0].eventTime : 0;
-  const endTime = lastEnd ?? (events.length ? events[events.length - 1].eventTime : 0);
-  let openSessions = 0;
-  for (const s of sessions.values()) if (s.endTime === undefined) openSessions++;
-
-  return {
-    startTime,
-    endTime,
-    mediaTypes: [...mediaTypes].sort(),
-    direction,
-    participants: [...participants.values()],
-    agents: [...agents].sort(),
-    queues: [...queues.values()].sort((a, b) => (a.enteredAt ?? 0) - (b.enteredAt ?? 0)),
-    wrapUps: [...wrapUps.values()].sort((a, b) => a.time - b.time),
-    attributes,
-    timeline: events.map((e) => ({ time: e.eventTime, kind: e.kind, participantId: e.participantId })),
-    openSessions,
-  };
+  for (const e of events) {
+    if (!e.participantId || !(isStart(e.kind) || isEnd(e.kind))) continue;
+    const sid = e.sessionId ?? e.participantId;
+    if (isEnd(e.kind)) ended.set(sid, true);
+    else if (!ended.has(sid)) ended.set(sid, false);
+  }
+  if (ended.size === 0) return false;
+  for (const done of ended.values()) if (!done) return false;
+  return true;
 }
 
 /**
@@ -156,14 +218,5 @@ export function consolidate(input: Iterable<ConversationEvent>): Consolidated {
  * that has been seen has also reported its end.
  */
 export function allSessionsEnded(events: Iterable<ConversationEvent>): boolean {
-  const open = new Map<string, boolean>();
-  for (const e of events) {
-    if (!e.participantId || !(isStart(e.kind) || isEnd(e.kind))) continue;
-    const sid = e.sessionId ?? e.participantId;
-    if (isEnd(e.kind)) open.set(sid, false);
-    else if (!open.has(sid)) open.set(sid, true);
-  }
-  if (open.size === 0) return false;
-  for (const isOpen of open.values()) if (isOpen) return false;
-  return true;
+  return sessionsEnded(undefined, events);
 }
