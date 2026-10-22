@@ -6,25 +6,25 @@
 ![zero dependencies](https://img.shields.io/badge/runtime%20dependencies-0-6FF2C6)
 ![license](https://img.shields.io/badge/license-MIT-A98BFF)
 
-Genesys Cloud tells you about a conversation one small event at a time: the customer connected, the call entered a queue, an agent answered, someone hung up, the agent picked a wrap-up code. Those events arrive **partial, duplicated, out of order and sometimes late**. Anything downstream (a CRM sync, a data warehouse, an analytics or AI pipeline) usually wants the opposite: **one complete, correct record per conversation, once it is over**.
+Genesys Cloud publishes each change in a conversation as a separate event: customer connected, call queued, agent answered, disconnect, wrap-up. In practice those events can arrive duplicated, out of order, or after the conversation has already ended. Most consumers (a CRM sync, a data warehouse, reporting) need one complete record per conversation instead.
 
-This library is the piece in between. It is small, has zero runtime dependencies, runs in a long-lived process or in **serverless functions**, and comes with a simulator so you can see it work without a Genesys account.
+This library groups the events by conversation, waits until the conversation is finished and emits that record. It has no runtime dependencies, runs in a long-running process or in serverless functions, and includes a simulator so it can be tried without a Genesys account.
 
 <img src="docs/demo.svg" alt="Terminal demo: 332 messy events go in, 25 clean records come out, every one matching what actually happened" width="100%">
 
-<sub>The demo above is real output from the built-in simulator. Run it yourself with `npm install && npm run demo`.</sub>
+<sub>Output of the built-in simulator (`npm install && npm run demo`).</sub>
 
-## Why this is harder than it looks
+## What it handles
 
-| What the stream does | What goes wrong if you take it at face value | What the stitcher does |
+| Stream behaviour | Effect if consumed as-is | Handling |
 | --- | --- | --- |
-| Delivers the same event twice | Double-counted transfers, two wrap-ups | Fingerprints each event by content and drops repeats |
-| Delivers events out of order | An agent "answers" before the customer calls | Rebuilds the conversation by event time, not arrival time |
-| Sends the customer hang-up before the agent's wrap-up | Record is written without the wrap-up code | Waits until every session has ended, then a quiet settle window |
-| Sends an event after the record was written | Silent data loss | Emits a new revision of the record (or drops it, your choice) |
-| Never sends the end at all | Conversation stays in memory forever | Idle timeout emits what is known, flagged as `timeout` |
-| Keeps a messaging conversation open for days | State grows with every event | Old events are compacted into a summary; state stays bounded |
-| Sends the whole conversation on every change (snapshot topics) | The same session counted ten times | Snapshots become events with stable fingerprints, so repeats collapse |
+| Same event delivered twice | Transfers or wrap-ups counted twice | Events are fingerprinted by content; repeats are dropped |
+| Events delivered out of order | Agent connected before the customer | The record is built in event-time order, not arrival order |
+| Customer disconnect arrives before the agent's wrap-up | Record saved without the wrap-up code | Emits only after every session has ended, plus a settle window |
+| Event arrives after the record was emitted | Event is lost | Emits a new revision of the record (or drops the event, configurable) |
+| End of conversation never arrives | Conversation kept in memory indefinitely | Idle timeout emits what is known, with `closeReason: "timeout"` |
+| Messaging conversation stays open for days | State grows with every event | Older events are compacted; state size is bounded |
+| Snapshot topics send the full conversation on every change | Same session counted many times | Snapshots are converted to events with stable fingerprints, so repeats are dropped |
 
 ## Install
 
@@ -61,9 +61,9 @@ for await (const message of yourQueue) {
   stitcher.ingest(JSON.parse(message.body));
 }
 
-// Something has to move time forward. Either let the stitcher do it...
+// Records are emitted by tick(). Run it on a timer...
 const stop = stitcher.start(1_000);
-// ...or call stitcher.tick() yourself after each batch.
+// ...or call stitcher.tick() after each batch.
 ```
 
 The stitcher never reads the clock on its own: `ingest(event, now)` and `tick(now)` both take the time as an argument (defaulting to `Date.now()`). That is what makes it deterministic to test and replay. See [ADR 0001](docs/adr/0001-deterministic-core.md).
@@ -105,16 +105,16 @@ The stitcher never reads the clock on its own: `ingest(event, now)` and `tick(no
 }
 ```
 
-`delivery` tells you how messy the stream was for this conversation, which is useful for monitoring the pipeline itself.
+`delivery` counts duplicates, reordering and late events for the conversation, which is useful for monitoring the pipeline.
 
 ## Serverless
 
-Serverless functions remember nothing between invocations and run many copies in parallel. `StoredConversationStitcher` is built for that:
+Serverless functions keep no state between invocations and may run in parallel. `StoredConversationStitcher` stores each conversation separately in a `ConversationStore`:
 
-- **State per conversation.** Each conversation is one row (or key) in a `ConversationStore`. An invocation only loads the conversations in its batch.
-- **Optimistic concurrency.** Every write is conditional on the version that was read. When two invocations touch the same conversation at once, one wins and the other reloads and reapplies. No locks, no lost events.
-- **A due index.** Each row carries the time it next needs attention, so the scheduled function only loads what is ready.
-- **At-least-once delivery.** A record is claimed before your listener runs and confirmed after it succeeds. If the listener throws or the function is killed halfway, the same revision is delivered again after `ackTimeoutMs`.
+- Each conversation is one row (or key). An invocation only loads the conversations in its batch.
+- Writes are conditional on the version that was read. If two invocations update the same conversation at the same time, one write fails and that invocation reloads and reapplies its events.
+- Each row stores when it next needs attention, so the scheduled function only loads conversations that are due.
+- Delivery is at-least-once. A record is marked as in delivery before the listener runs and confirmed after it returns. If the listener throws or the function stops halfway, the same revision is delivered again after `ackTimeoutMs`.
 
 ```
 Genesys Cloud ──► queue ──► onEvents()    ── ingestAll() ──►  store
@@ -142,7 +142,7 @@ A store is four methods (`load`, conditional `save`, conditional `delete`, `due`
 3. Any new event for that conversation restarts the window. After-call work and wrap-up codes typically land here.
 4. When the window passes quietly, the record is emitted.
 
-A customer hanging up is not the end: the agent may still be in after-call work. Details and trade-offs in [ADR 0002](docs/adr/0002-closing-a-conversation.md).
+The customer disconnecting is not enough, because the agent may still be in after-call work. Details and trade-offs in [ADR 0002](docs/adr/0002-closing-a-conversation.md).
 
 ## Try it without Genesys
 
@@ -188,7 +188,7 @@ A messaging conversation can stay open for days and collect thousands of events.
 
 Once a conversation holds more than `compactAfterEvents` raw events (500 by default), the ones older than `compactLagMs` (15 min) behind the newest event are folded into a compact summary and dropped. Only their fingerprints are kept for a while, so late duplicates are still recognized. Recent events stay raw, so normal reordering is still handled exactly. The timeline keeps its first entry and the most recent ones (`maxTimelineEntries`, 1000).
 
-In numbers, from the test suite: a single conversation with 100,000 events is processed in about 1.3 s and its stored state stays around 300 KB from the first thousand events to the last. `delivery.compactedEvents` tells you when it kicked in. Trade-offs in [ADR 0006](docs/adr/0006-compacting-long-conversations.md).
+In the test suite, a conversation with 100,000 events is processed in about 1.3 s and its stored state stays around 300 KB. `delivery.compactedEvents` shows how many events were compacted. Trade-offs in [ADR 0006](docs/adr/0006-compacting-long-conversations.md).
 
 ## Input format
 
