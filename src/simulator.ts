@@ -1,5 +1,6 @@
 import type { ConsolidatedConversation, RawNotification } from "./types.js";
 import type { ConversationStitcher } from "./stitcher.js";
+import type { StoredConversationStitcher } from "./stored-stitcher.js";
 
 /**
  * Generates realistic conversation event streams, then damages them the way a
@@ -236,6 +237,34 @@ export function replay(
   while (now < end) {
     now += step;
     out.push(...stitcher.tick(now));
+  }
+  return out;
+}
+
+/**
+ * Like {@link replay}, for a {@link StoredConversationStitcher}. Deliveries
+ * that fall within the same tick are ingested as parallel calls, the way
+ * concurrent function invocations would hit the store.
+ */
+export async function replayStored(
+  stitcher: StoredConversationStitcher,
+  deliveries: readonly Delivery[],
+  options: ReplayOptions = {},
+): Promise<ConsolidatedConversation[]> {
+  const step = options.tickEveryMs ?? 1000;
+  const drain = options.drainMs ?? 10 * 60_000;
+  const out: ConsolidatedConversation[] = [];
+  if (deliveries.length === 0) return out;
+
+  let now = deliveries[0].at;
+  let i = 0;
+  const end = deliveries[deliveries.length - 1].at + drain;
+  while (now < end) {
+    const batch: Delivery[] = [];
+    while (i < deliveries.length && deliveries[i].at <= now) batch.push(deliveries[i++]);
+    await Promise.all(batch.map((d) => stitcher.ingest(d.notification, d.at)));
+    out.push(...(await stitcher.tick(now, Infinity)));
+    now += step;
   }
   return out;
 }

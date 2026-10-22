@@ -4,7 +4,7 @@
 
 Genesys Cloud tells you about a conversation one small event at a time: the customer connected, the call entered a queue, an agent answered, someone hung up, the agent picked a wrap-up code. Those events arrive **partial, duplicated, out of order and sometimes late**. Anything downstream (a CRM sync, a data warehouse, an analytics or AI pipeline) usually wants the opposite: **one complete, correct record per conversation, once it is over**.
 
-This library is the piece in between. It is small, has zero runtime dependencies, and comes with a simulator so you can see it work without a Genesys account.
+This library is the piece in between. It is small, has zero runtime dependencies, runs in a long-lived process or in **serverless functions**, and comes with a simulator so you can see it work without a Genesys account.
 
 ```
 $ npx genesys-conversation-stitcher
@@ -35,6 +35,11 @@ npm install genesys-conversation-stitcher
 Node 18 or later. ESM only.
 
 ## Usage
+
+There are two flavours with the same rules and the same output:
+
+- `ConversationStitcher` keeps state in memory. For a worker or container that runs all the time.
+- `StoredConversationStitcher` keeps state per conversation in a database. For serverless functions, see [Serverless](#serverless).
 
 ```ts
 import { ConversationStitcher } from "genesys-conversation-stitcher";
@@ -100,6 +105,34 @@ The stitcher never reads the clock on its own: `ingest(event, now)` and `tick(no
 
 `delivery` tells you how messy the stream was for this conversation, which is useful for monitoring the pipeline itself.
 
+## Serverless
+
+Serverless functions remember nothing between invocations and run many copies in parallel. `StoredConversationStitcher` is built for that:
+
+- **State per conversation.** Each conversation is one row (or key) in a `ConversationStore`. An invocation only loads the conversations in its batch.
+- **Optimistic concurrency.** Every write is conditional on the version that was read. When two invocations touch the same conversation at once, one wins and the other reloads and reapplies. No locks, no lost events.
+- **A due index.** Each row carries the time it next needs attention, so the scheduled function only loads what is ready.
+- **At-least-once delivery.** A record is claimed before your listener runs and confirmed after it succeeds. If the listener throws or the function is killed halfway, the same revision is delivered again after `ackTimeoutMs`.
+
+```
+Genesys Cloud ──► queue ──► onEvents()    ── ingestAll() ──►  store
+                            onSchedule()  ── tick() ───────►  store ──► your listener
+                            (every ~10 s)
+```
+
+```ts
+import { StoredConversationStitcher } from "genesys-conversation-stitcher";
+import { PostgresConversationStore } from "./postgres-store.js";   // see examples/
+
+const stitcher = new StoredConversationStitcher(new PostgresConversationStore(pool));
+stitcher.onRecord(async (record) => upsert(record));   // may be async
+
+export const onEvents = (batch) => stitcher.ingestAll(batch.messages.map((m) => JSON.parse(m.body)));
+export const onSchedule = () => stitcher.tick(Date.now(), 500);
+```
+
+A store is four methods (`load`, conditional `save`, conditional `delete`, `due`), so any database with a conditional write works: SQL, a key-value store with compare-and-set, a document store with ETags. The package ships `MemoryConversationStore` for tests, and [examples/](examples/) has a tested PostgreSQL store and a complete pair of handlers. Design notes in [ADR 0005](docs/adr/0005-serverless-store-and-optimistic-concurrency.md).
+
 ## How it decides a conversation is over
 
 1. Every start event (`customer.start`, `flow.start`, `acd.start`, `user.start`) opens a session; the matching end closes it.
@@ -134,9 +167,9 @@ npx genesys-conversation-stitcher --conversations 100 --seed 3 --straggle 0.05
 npx genesys-conversation-stitcher --json > records.json
 ```
 
-## Surviving restarts
+## Surviving restarts (in-memory flavour)
 
-State lives in memory. To survive a deploy or a crash, persist a snapshot and restore it on boot:
+`ConversationStitcher` keeps state in memory. To survive a deploy or a crash, persist a snapshot and restore it on boot:
 
 ```ts
 await store.put("stitcher", JSON.stringify(stitcher.snapshot()));
@@ -173,8 +206,10 @@ new ConversationStitcher({
 | `onRecord(listener)` | Subscribe to emitted records; returns an unsubscribe function |
 | `snapshot()` / `restore(snapshot)` | JSON-safe state for persistence |
 | `size` / `pending` | Conversations in memory / waiting to be emitted |
+| `new StoredConversationStitcher(store, options?)` | Same options plus `ackTimeoutMs` and `maxAttempts`; `ingest`, `ingestAll` and `tick` return promises |
+| `MemoryConversationStore` | Reference `ConversationStore`, kept in memory |
 | `consolidate(events)` | The pure folding function, if you want to bring your own buffering |
-| `simulate(options?)` / `replay(stitcher, deliveries)` | Simulator and simulated-clock runner |
+| `simulate(options?)` / `replay(...)` / `replayStored(...)` | Simulator and simulated-clock runners |
 
 ## Design decisions
 
@@ -182,12 +217,13 @@ new ConversationStitcher({
 - [0002 · Closing a conversation: all sessions ended, then a settle window](docs/adr/0002-closing-a-conversation.md)
 - [0003 · Idempotency by content fingerprint, late events as revisions](docs/adr/0003-idempotency-and-revisions.md)
 - [0004 · In-memory state with snapshots, no built-in storage](docs/adr/0004-in-memory-state-with-snapshots.md)
+- [0005 · Serverless: per-conversation store and optimistic concurrency](docs/adr/0005-serverless-store-and-optimistic-concurrency.md)
 
 ## Development
 
 ```bash
 npm install
-npm test        # unit tests + property tests against the simulator's ground truth
+npm test        # unit, concurrency and property tests against the simulator's ground truth
 npm run demo
 ```
 

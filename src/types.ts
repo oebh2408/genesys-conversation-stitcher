@@ -145,6 +145,12 @@ export interface StitcherOptions {
   lateEvents?: LateEventPolicy;
   /** How long emitted conversations are remembered for late events. Default: 1 h. */
   retainEmittedMs?: number;
+  /**
+   * Stored stitcher only: how long a delivered record may stay unconfirmed
+   * (listener still running, or the function crashed) before it is delivered
+   * again. Default: 60 s.
+   */
+  ackTimeoutMs?: number;
   /** Replace the built-in topic adapter. Return `null` to ignore a notification. */
   normalize?: (n: RawNotification) => ConversationEvent | null;
 }

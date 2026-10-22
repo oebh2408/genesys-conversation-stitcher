@@ -1,6 +1,6 @@
 {
   "name": "genesys-conversation-stitcher",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Turns the partial, duplicated, out-of-order Genesys Cloud conversation event stream into one clean record per conversation.",
   "keywords": [
     "genesys",
@@ -11,7 +11,8 @@
     "event-stream",
     "deduplication",
     "stream-processing",
-    "typescript"
+    "typescript",
+    "serverless"
   ],
   "author": "Oscar Benavides (https://ob0.dev)",
   "license": "MIT",
@@ -43,12 +44,15 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc -p tsconfig.examples.json",
     "test": "vitest run",
     "demo": "tsc && node dist/cli.js",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm run typecheck && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "pg-mem": "^3.0.14",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
   }

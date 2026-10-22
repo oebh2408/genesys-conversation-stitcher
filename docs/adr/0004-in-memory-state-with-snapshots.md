@@ -1,6 +1,6 @@
 # 0004 · In-memory state with snapshots, no built-in storage
 
-- Status: accepted
+- Status: accepted, amended by [0005](0005-serverless-store-and-optimistic-concurrency.md) for serverless deployments
 - Date: 2026-10-22
 
 ## Context
